@@ -1,0 +1,7 @@
+# Dependencias mínimas para el frontend Flask + Jinja2
+Flask>=2.2,<3.0
+PyMySQL>=1.0            # driver Python puro para MySQL (evita compilar librerías nativas)
+SQLAlchemy>=1.4         # opcional si usas ORM
+Flask-Cors>=3.0         # si el frontend hace peticiones a APIs con distinto origen
+python-dotenv>=1.0.0    # para cargar variables de entorno desde .env (opcional)
+gunicorn>=20.0          # opcional (no necesario con Apache+mod_wsgi, pero útil para otras pruebas)

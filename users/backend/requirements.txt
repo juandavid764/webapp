@@ -1,0 +1,9 @@
+# Dependencias mínimas para el backend Flask + SQLAlchemy + PyMySQL
+Flask>=2.2,<3.0
+Flask-SQLAlchemy>=2.5
+PyMySQL>=1.0            # driver Python puro para MySQL
+cryptography>=3.4.8     # requerido por PyMySQL para conexiones seguras
+SQLAlchemy>=1.4         # ORM
+python-dotenv>=1.0.0    # para cargar variables de entorno desde .env (opcional)
+Gunicorn>=20.0          # servidor WSGI para producción
+Flask-Cors>=3.0         # si necesitas CORS en el backend
