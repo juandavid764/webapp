@@ -661,6 +661,371 @@ docker-compose build frontend
 docker-compose up -d frontend
 ```
 
+## 📊 Monitoreo con Prometheus y Node Exporter
+
+### ¿Qué es Node Exporter?
+
+**Node Exporter** es un exportador oficial de Prometheus que recopila métricas a nivel de hardware y sistema operativo de sistemas Unix/Linux. 
+
+**¿Cómo funciona?**
+1. **Recopila métricas del sistema**: Lee archivos del sistema como `/proc/` y `/sys/` en Linux
+2. **Expone métricas en formato Prometheus**: Las presenta en el endpoint `/metrics` (puerto 9100 por defecto)
+3. **Actualiza continuamente**: Las métricas se generan en tiempo real cuando Prometheus las solicita
+4. **No almacena datos**: Solo expone las métricas actuales; Prometheus se encarga del almacenamiento
+
+### Instalación de Prometheus y Node Exporter
+
+#### 1. Instalar Node Exporter
+```bash
+# Descargar Node Exporter
+cd /tmp
+wget https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz
+
+# Extraer
+tar xvfz node_exporter-1.7.0.linux-amd64.tar.gz
+
+# Mover binario
+sudo mv node_exporter-1.7.0.linux-amd64/node_exporter /usr/local/bin/
+
+# Crear usuario del sistema
+sudo useradd -rs /bin/false node_exporter
+
+# Crear servicio systemd
+sudo tee /etc/systemd/system/node_exporter.service > /dev/null <<EOF
+[Unit]
+Description=Node Exporter
+After=network.target
+
+[Service]
+User=node_exporter
+Group=node_exporter
+Type=simple
+ExecStart=/usr/local/bin/node_exporter
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Iniciar y habilitar servicio
+sudo systemctl daemon-reload
+sudo systemctl start node_exporter
+sudo systemctl enable node_exporter
+
+# Verificar estado
+sudo systemctl status node_exporter
+
+# Probar endpoint
+curl http://localhost:9100/metrics
+```
+
+#### 2. Instalar Prometheus
+```bash
+# Descargar Prometheus
+cd /tmp
+wget https://github.com/prometheus/prometheus/releases/download/v2.48.0/prometheus-2.48.0.linux-amd64.tar.gz
+
+# Extraer
+tar xvfz prometheus-2.48.0.linux-amd64.tar.gz
+
+# Crear directorios
+sudo mkdir -p /etc/prometheus /var/lib/prometheus
+
+# Mover archivos
+sudo mv prometheus-2.48.0.linux-amd64/prometheus /usr/local/bin/
+sudo mv prometheus-2.48.0.linux-amd64/promtool /usr/local/bin/
+sudo mv prometheus-2.48.0.linux-amd64/consoles /etc/prometheus/
+sudo mv prometheus-2.48.0.linux-amd64/console_libraries /etc/prometheus/
+
+# Crear usuario del sistema
+sudo useradd -rs /bin/false prometheus
+
+# Cambiar propietario
+sudo chown -R prometheus:prometheus /etc/prometheus /var/lib/prometheus
+```
+
+#### 3. Configurar prometheus.yml
+```bash
+sudo tee /etc/prometheus/prometheus.yml > /dev/null <<EOF
+# Configuración global
+global:
+  scrape_interval: 15s          # Frecuencia de recolección
+  evaluation_interval: 15s      # Frecuencia de evaluación de reglas
+
+# Configuración de alertas
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+# Archivos de reglas de alertas
+rule_files:
+  - "alert_rules.yml"
+
+# Configuración de scrape (recolección de métricas)
+scrape_configs:
+  # Métricas de Prometheus mismo
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Métricas del sistema (Node Exporter)
+  - job_name: 'node_exporter'
+    static_configs:
+      - targets: ['localhost:9100']
+        labels:
+          alias: 'servidor-local'
+
+  # Métricas de la aplicación Flask (opcional)
+  - job_name: 'flask_app'
+    static_configs:
+      - targets: ['localhost:5001']
+EOF
+
+sudo chown prometheus:prometheus /etc/prometheus/prometheus.yml
+```
+
+#### 4. Configurar Reglas de Alertas
+```bash
+sudo tee /etc/prometheus/alert_rules.yml > /dev/null <<EOF
+groups:
+  - name: system_alerts
+    interval: 10s
+    rules:
+      # Alerta de CPU alta
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 2m
+        labels:
+          severity: warning
+          category: system
+        annotations:
+          summary: "CPU usage is above 80% on {{ \$labels.instance }}"
+          description: "CPU usage is {{ \$value }}% on {{ \$labels.instance }} for more than 2 minutes."
+
+      # Alerta de memoria baja
+      - alert: LowMemory
+        expr: (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 < 20
+        for: 5m
+        labels:
+          severity: warning
+          category: system
+        annotations:
+          summary: "Available memory is below 20% on {{ \$labels.instance }}"
+          description: "Only {{ \$value }}% memory available on {{ \$labels.instance }}."
+
+      # Alerta de disco lleno
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"}) * 100 < 15
+        for: 5m
+        labels:
+          severity: critical
+          category: storage
+        annotations:
+          summary: "Disk space is below 15% on {{ \$labels.instance }}"
+          description: "Filesystem {{ \$labels.mountpoint }} has only {{ \$value }}% available space."
+
+      # Alerta de servicio caído
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "Service {{ \$labels.job }} is down"
+          description: "{{ \$labels.job }} on {{ \$labels.instance }} has been down for more than 1 minute."
+EOF
+
+sudo chown prometheus:prometheus /etc/prometheus/alert_rules.yml
+```
+
+#### 5. Crear Servicio Prometheus
+```bash
+sudo tee /etc/systemd/system/prometheus.service > /dev/null <<EOF
+[Unit]
+Description=Prometheus
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=prometheus
+Group=prometheus
+Type=simple
+ExecStart=/usr/local/bin/prometheus \\
+  --config.file=/etc/prometheus/prometheus.yml \\
+  --storage.tsdb.path=/var/lib/prometheus/ \\
+  --web.console.templates=/etc/prometheus/consoles \\
+  --web.console.libraries=/etc/prometheus/console_libraries
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Iniciar Prometheus
+sudo systemctl daemon-reload
+sudo systemctl start prometheus
+sudo systemctl enable prometheus
+
+# Verificar estado
+sudo systemctl status prometheus
+```
+
+#### 6. Verificar Instalación
+```bash
+# Verificar que los servicios estén corriendo
+sudo systemctl status node_exporter
+sudo systemctl status prometheus
+
+# Probar acceso a las interfaces web
+# Prometheus UI: http://localhost:9090
+# Node Exporter metrics: http://localhost:9100/metrics
+
+# Ver targets en Prometheus
+curl http://localhost:9090/api/v1/targets
+
+# Ver alertas activas
+curl http://localhost:9090/api/v1/alerts
+```
+
+### Tres Métricas Específicas y su Utilidad
+
+#### 1. **node_cpu_seconds_total**
+**Tipo**: Counter
+
+**Descripción**: Contador que registra el tiempo total (en segundos) que cada CPU ha pasado en diferentes modos de operación (user, system, idle, iowait, etc.).
+
+**Utilidad en el monitoreo**:
+- Permite calcular el porcentaje de uso de CPU en tiempo real
+- Identifica cuellos de botella de procesamiento
+- Ayuda a determinar si se necesita escalar verticalmente (más CPUs) o si hay procesos consumiendo recursos excesivos
+- Se puede usar para detectar anomalías en el rendimiento de aplicaciones
+
+**Ejemplo de consulta PromQL**:
+```promql
+# Porcentaje de uso de CPU (excluyendo tiempo idle)
+100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+```
+
+**Aplicación práctica**: Si el uso de CPU supera el 80% de forma sostenida, puede indicar que la aplicación necesita optimización o más recursos. Es útil para configurar auto-scaling en entornos cloud.
+
+---
+
+#### 2. **node_memory_MemAvailable_bytes**
+**Tipo**: Gauge
+
+**Descripción**: Cantidad de memoria (en bytes) que está disponible para ser usada por nuevos procesos sin necesidad de hacer swap. Esta métrica considera memoria libre más memoria que puede ser liberada de cachés.
+
+**Utilidad en el monitoreo**:
+- Previene problemas de falta de memoria (OOM - Out Of Memory)
+- Ayuda a dimensionar correctamente la memoria RAM necesaria
+- Identifica memory leaks en aplicaciones
+- Permite configurar alertas antes de que el sistema colapse por falta de memoria
+
+**Ejemplo de consulta PromQL**:
+```promql
+# Porcentaje de memoria disponible
+(node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100
+```
+
+**Aplicación práctica**: Si la memoria disponible cae por debajo del 20%, es señal de que el sistema está bajo presión de memoria. Esto puede causar que el sistema operativo empiece a usar swap, degradando significativamente el rendimiento.
+
+---
+
+#### 3. **node_filesystem_avail_bytes**
+**Tipo**: Gauge
+
+**Descripción**: Cantidad de espacio disponible (en bytes) en cada sistema de archivos montado. Proporciona información detallada por punto de montaje (mountpoint) y tipo de filesystem.
+
+**Utilidad en el monitoreo**:
+- Previene que las aplicaciones fallen por falta de espacio en disco
+- Identifica crecimientos anormales de datos (posibles logs sin rotar, dumps, etc.)
+- Permite planificar el crecimiento de almacenamiento
+- Esencial para aplicaciones que escriben logs o datos de forma continua
+
+**Ejemplo de consulta PromQL**:
+```promql
+# Porcentaje de espacio libre en disco
+(node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"}) * 100
+```
+
+**Aplicación práctica**: Si el espacio disponible cae por debajo del 15%, las aplicaciones pueden empezar a fallar al intentar escribir archivos. Bases de datos, sistemas de logging y aplicaciones web son especialmente vulnerables a la falta de espacio en disco.
+
+---
+
+### Acceso a las Interfaces
+
+#### Prometheus UI
+```
+http://localhost:9090
+```
+
+**Funcionalidades:**
+- Explorar métricas en tiempo real
+- Ejecutar consultas PromQL
+- Ver targets configurados
+- Monitorear alertas activas
+- Visualizar gráficos de métricas
+
+#### Node Exporter Metrics
+```
+http://localhost:9100/metrics
+```
+
+**Ejemplos de métricas expuestas:**
+```
+# Métricas de CPU
+node_cpu_seconds_total{cpu="0",mode="idle"} 12345.67
+node_cpu_seconds_total{cpu="0",mode="system"} 890.12
+
+# Métricas de memoria
+node_memory_MemTotal_bytes 4147638272
+node_memory_MemAvailable_bytes 2048819136
+
+# Métricas de disco
+node_filesystem_avail_bytes{device="/dev/sda1",mountpoint="/"} 15234567890
+node_filesystem_size_bytes{device="/dev/sda1",mountpoint="/"} 42949672960
+```
+
+### Consultas PromQL Útiles
+
+```promql
+# CPU: Uso por núcleo
+100 - (avg by(cpu) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+
+# Memoria: Uso en porcentaje
+100 - ((node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100)
+
+# Disco: Espacio usado en GB
+(node_filesystem_size_bytes - node_filesystem_avail_bytes) / 1024 / 1024 / 1024
+
+# Red: Bytes recibidos por segundo
+irate(node_network_receive_bytes_total[5m])
+
+# Sistema: Uptime en días
+node_time_seconds - node_boot_time_seconds) / 86400
+
+# Procesos: Número total en ejecución
+node_procs_running
+```
+
+### Probar Alertas de CPU
+
+Para probar la alerta de CPU alta, puedes generar carga artificial:
+
+```bash
+# Instalar stress (si no está instalado)
+sudo apt-get install -y stress
+
+# Generar carga de CPU durante 5 minutos
+stress --cpu 4 --timeout 300s
+
+# Monitorear en Prometheus
+# Ve a http://localhost:9090/alerts
+# Deberías ver la alerta HighCPUUsage activarse después de 2 minutos
+```
+
+---
+
 ## 🐳 Docker
 
 ### Servicios
@@ -737,4 +1102,48 @@ docker exec -it miniweb-db mysql -u root -proot  # MySQL CLI
 docker system prune                     # Limpiar recursos no usados
 docker volume prune                     # Eliminar volúmenes no usados
 docker image prune -a                   # Eliminar imágenes no usadas
+```
+
+## 🎓 Reflexiones y Aprendizajes
+
+### 1. ¿Qué aprendí al integrar Docker, AWS y Prometheus?
+
+Que estas herramientas permiten crear un entorno completo de despliegue y monitoreo:
+
+- **Docker** estandariza la aplicación, asegurando que funcione igual en cualquier entorno
+- **AWS** la ejecuta y escala en la nube con alta disponibilidad
+- **Prometheus** ofrece métricas para supervisar su estado en tiempo real
+
+Esta integración permite tener un ciclo completo de desarrollo, despliegue y monitoreo, fundamental en prácticas DevOps modernas.
+
+---
+
+### 2. ¿Qué fue lo más desafiante y cómo lo resolvería en un entorno real?
+
+**El desafío principal:** Lograr que los contenedores se comunicaran correctamente entre sí.
+
+**Solución en entorno real:**
+- **Redes bien definidas**: Crear redes Docker específicas por servicio (frontend, backend, database)
+- **Variables de entorno claras**: Centralizar configuración en archivos `.env` con validación
+- **Healthchecks robustos**: Implementar verificaciones de salud en todos los servicios
+- **Service discovery**: Utilizar herramientas como Consul o servicios nativos de Kubernetes
+- **Logging centralizado**: Integrar ELK Stack (Elasticsearch, Logstash, Kibana) para debugging
+- **Documentación exhaustiva**: Mantener diagramas de arquitectura y runbooks actualizados
+
+---
+
+### 3. ¿Qué beneficio aporta la observabilidad en DevOps?
+
+La observabilidad es fundamental porque:
+
+- ✅ **Detecta problemas temprano**: Identifica issues antes de que afecten a usuarios finales
+- ✅ **Asegura disponibilidad**: Permite cumplir SLAs mediante alertas proactivas
+- ✅ **Decisiones basadas en datos**: Optimizaciones y escalado fundamentados en métricas reales
+- ✅ **Evita "volar a ciegas"**: Proporciona visibilidad completa del estado del sistema en producción
+- ✅ **Reduce MTTR** (Mean Time To Recovery): Acelera la identificación y resolución de incidentes
+- ✅ **Mejora continua**: Permite análisis post-mortem y prevención de incidentes recurrentes
+
+En resumen, la observabilidad transforma el monitoreo reactivo en gestión proactiva de infraestructura.
+
+---
 ```

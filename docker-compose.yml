@@ -11,7 +11,7 @@ services:
       MYSQL_USER: miniweb_user
       MYSQL_PASSWORD: miniweb_pass
     ports:
-      - "3306:3306"
+      - "3307:3306"
     volumes:
       - db_data:/var/lib/mysql
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
