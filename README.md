@@ -1,3 +1,4 @@
+# Juan David Trujillo - Sebastian Medina Garcia (ParcialFinal Servicios Telematicos)
 # Sistema de Gestión de Usuarios - Flask Web Application
 
 ![Python](https://img.shields.io/badge/Python-3.11-blue.svg)
@@ -12,6 +13,7 @@
 - [Características](#-características)
 - [Arquitectura](#-arquitectura)
 - [Tecnologías](#-tecnologías)
+- [Evidencias de Despliegue](#-evidencias-de-despliegue)
 - [Requisitos Previos](#-requisitos-previos)
 - [Instalación y Configuración](#-instalación-y-configuración)
 - [Uso](#-uso)
@@ -117,6 +119,18 @@ Sistema web completo de gestión de usuarios (CRUD) desarrollado con Flask, util
 - **Nginx** - Servidor web y proxy reverso
 - **Docker & Docker Compose** - Contenedorización
 - **OpenSSL** - Certificados SSL/TLS
+
+## 📸 Evidencias de Despliegue
+En esta sección se incluyen las pruebas del despliegue completo del sistema, tanto en entorno local como en la instancia AWS EC2
+
+### 🎥 Video de Despliegue  
+https://youtu.be/9-ThfNArl_E 
+
+### 🖼️ Capturas de Pantalla 
+
+<img width="941" height="481" alt="image" src="https://github.com/user-attachments/assets/81779676-870e-4141-91df-0754b39071a2" />
+<img width="876" height="499" alt="image" src="https://github.com/user-attachments/assets/37130ea7-51ec-4559-b9d1-1c4b109cef7f" />
+
 
 ## 📦 Requisitos Previos
 
